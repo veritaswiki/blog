@@ -1,20 +1,36 @@
 name: Deploy Hugo site to Pages
 
 on:
+  # 自动触发
   push:
-    branches:
-      - main
+    branches: [ main ]
+  # 允许手动触发
+  workflow_dispatch:
+  # 定时触发（每天凌晨3点）
+  schedule:
+    - cron: '0 3 * * *'
+
+# 环境变量
+env:
+  HUGO_VERSION: '0.139.2'
+  TZ: Asia/Shanghai
 
 permissions:
   contents: write
   pages: write
   id-token: write
 
+# 并发控制
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
           submodules: true
           fetch-depth: 0
@@ -22,11 +38,32 @@ jobs:
       - name: Setup Hugo
         uses: peaceiris/actions-hugo@v2
         with:
-          hugo-version: '0.139.2'
+          hugo-version: ${{ env.HUGO_VERSION }}
           extended: true
 
+      # 缓存依赖
+      - name: Cache Hugo modules
+        uses: actions/cache@v3
+        with:
+          path: /tmp/hugo_cache
+          key: ${{ runner.os }}-hugomod-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-hugomod-
+
       - name: Build
-        run: hugo --minify
+        run: |
+          hugo --minify
+          echo "Build completed at $(date)"
+
+      - name: Check HTML files
+        run: |
+          if [ -d "./public" ]; then
+            echo " Build generated HTML files successfully"
+            ls -lh ./public
+          else
+            echo " No HTML files were generated"
+            exit 1
+          fi
 
       - name: Deploy
         uses: peaceiris/actions-gh-pages@v3
@@ -34,5 +71,12 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./public
-          commit_message: ${{ github.event.head_commit.message }}
-          full_commit_message: ${{ github.event.head_commit.message }}
+          commit_message: ${{ github.event.head_commit.message || 'Deploy updates' }}
+          full_commit_message: |
+            Deploy updates
+            
+            Triggered by ${{ github.event_name }}
+            Commit: ${{ github.sha }}
+          user_name: 'github-actions[bot]'
+          user_email: 'github-actions[bot]@users.noreply.github.com'
+          cname: veritas.wiki
